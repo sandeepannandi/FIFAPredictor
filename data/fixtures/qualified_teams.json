@@ -1,0 +1,9 @@
+{
+  "hosts": ["Mexico", "Canada", "USA"],
+  "UEFA": ["Austria", "Belgium", "Bosnia and Herzegovina", "Croatia", "Czech Republic", "England", "France", "Germany", "Netherlands", "Norway", "Portugal", "Scotland", "Sweden", "Switzerland", "Turkey"],
+  "CONMEBOL": ["Argentina", "Brazil", "Colombia", "Ecuador", "Paraguay", "Uruguay"],
+  "CAF": ["Algeria", "Cape Verde", "DR Congo", "Egypt", "Ghana", "Ivory Coast", "Morocco", "Senegal", "South Africa", "Tunisia"],
+  "AFC": ["Australia", "Iran", "Iraq", "Japan", "Jordan", "Qatar", "Saudi Arabia", "South Korea", "Uzbekistan"],
+  "CONCACAF": ["Haiti", "Panama"],
+  "OFC": ["New Zealand"]
+}

@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data files (ignored to avoid large uploads)
+data/raw/
+data/processed/
+!data/fixtures/
+
+# Model files
+models/
+*.pkl
+*.joblib
+
+# Output files
+outputs/
+*.png
+*.csv
+
+# Environments
+.venv/
+venv/
+env/
+.env
+
+# Notebooks
+.ipynb_checkpoints
+
+# IDEs
+.vscode/
+.idea/
