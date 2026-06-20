@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 import pytest
 import pandas as pd
 from src.utils import compute_elo_ratings, ELO_INITIAL
