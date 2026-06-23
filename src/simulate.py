@@ -49,44 +49,52 @@ class TournamentSimulator:
         self.elo_ratings = elo_ratings or {}
         self.default_elo = 1500.0
 
+        # Pre-compute match probabilities for all ordered team pairs.
+        # Since the features only depend on fixed ELO ratings, the probabilities
+        # never change across simulations — caching eliminates ~1M predict_proba calls.
+        n_pairs = len(self.all_teams) * (len(self.all_teams) - 1)
+        print(f"[..] Pre-computing {n_pairs:,} match probabilities...")
+        self._probs_cache = self._precompute_probabilities()
+        print(f"[OK] Probability cache built ({len(self._probs_cache)} pairs).")
+
     def _get_team_rating(self, team: str) -> float:
         """Get the ELO rating for a team, or fallback to default."""
         return self.elo_ratings.get(team, self.default_elo)
 
-    def _predict_match(self, home: str, away: str, neutral: bool = True) -> dict[str, float]:
+    def _predict_match(self, home: str, away: str) -> dict[str, float]:
         """
-        Predict probabilities for a hypothetical match using the trained model.
-        Features are estimated from the team ELO ratings since we cannot
-        compute rolling features for future tournament matches.
+        Look up pre-computed match probabilities from the cache.
+        Since probabilities depend only on fixed ELO ratings, they never change.
+        """
+        return self._probs_cache[(home, away)]
+
+    def _compute_match_proba(self, home: str, away: str) -> dict[str, float]:
+        """
+        Compute match probabilities from the trained model using ELO-based features.
+        Called once per ordered team pair during init to build the cache.
         """
         r_home = self._get_team_rating(home)
         r_away = self._get_team_rating(away)
 
-        # Map ELO ratings into approximately the same feature space as training:
-        # elo_diff is naturally the same.
-        # form, goals_scored, etc. are proxied by the ELO rating itself.
         elo_diff = r_home - r_away
-        
-        # Heuristic scaling for features based on ELO
-        # (normalized around 1500-1800 range typically)
-        form_proxy_home = (r_home - 1000) / 1000.0  # e.g., 1800 -> 0.8
+        form_proxy_home = (r_home - 1000) / 1000.0
         form_proxy_away = (r_away - 1000) / 1000.0
-        
+
         features = np.array([[
-            elo_diff,                        # elo_diff
-            max(0, form_proxy_home),         # home_form
-            max(0, form_proxy_away),         # away_form
-            1.5 + (r_home - 1500) / 400.0,   # home_goals_scored_avg
-            1.2 - (r_home - 1500) / 800.0,   # home_goals_conceded_avg
-            1.5 + (r_away - 1500) / 400.0,   # away_goals_scored_avg
-            1.2 - (r_away - 1500) / 800.0,   # away_goals_conceded_avg
-            0.5,                             # h2h_home_win_rate (neutral default)
-            0.4,                             # h2h_away_win_rate (neutral default)
-            0.0,                             # venue_home
-            1.0,                             # venue_neutral
-            5.0,                             # days_since_home
-            5.0,                             # days_since_away
-            4.0,                             # tournament_weight (World Cup)
+            elo_diff,
+            max(0, form_proxy_home),
+            max(0, form_proxy_away),
+            1.5 + (r_home - 1500) / 400.0,
+            1.2 - (r_home - 1500) / 800.0,
+            1.5 + (r_away - 1500) / 400.0,
+            1.2 - (r_away - 1500) / 800.0,
+            0.5,
+            0.4,
+            0.0,
+            1.0,
+            5.0,
+            5.0,
+            4.0,
         ]], dtype=np.float64)
 
         proba = self.model.predict_proba(features)[0]
@@ -96,9 +104,23 @@ class TournamentSimulator:
             "away_win": float(proba[2]),
         }
 
+    def _precompute_probabilities(self) -> dict[tuple[str, str], dict[str, float]]:
+        """
+        Build a lookup table of match probabilities for every ordered team pair.
+        The model is called once per pair instead of once per match per simulation.
+        """
+        cache = {}
+        teams = self.all_teams
+        for home in teams:
+            for away in teams:
+                if home == away:
+                    continue
+                cache[(home, away)] = self._compute_match_proba(home, away)
+        return cache
+
     def _sample_group_match(self, home: str, away: str) -> tuple[int, int]:
         """Sample a match result using model probabilities and Poisson goal distribution."""
-        probs = self._predict_match(home, away, neutral=True)
+        probs = self._predict_match(home, away)
         outcome = np.random.choice(
             ["home_win", "draw", "away_win"],
             p=[probs["home_win"], probs["draw"], probs["away_win"]]
@@ -184,34 +206,26 @@ class TournamentSimulator:
         first_place = []
         second_place = []
 
-        for group_label, standings in group_results.items():
-            first_place.append((group_label, standings[0][0]))
-            second_place.append((group_label, standings[1][0]))
+        for standings in group_results.values():
+            first_place.append(standings[0][0])
+            second_place.append(standings[1][0])
 
-        # Rank third-placed teams
+        # Rank third-placed teams by (points, GD, GF, ELO ranking), descending
         third_detailed = []
-        for group_label, standings in group_results.items():
+        for standings in group_results.values():
             t3 = standings[2]
-            third_detailed.append({
-                "group": group_label,
-                "team": t3[0],
-                "points": t3[1],
-                "gd": t3[2],
-                "gf": t3[3],
-                "ranking": self._get_team_rating(t3[0]),
-            })
+            third_detailed.append((
+                t3[0],                         # team name
+                t3[1],                         # points
+                t3[2],                         # goal difference
+                t3[3],                         # goals for
+                self._get_team_rating(t3[0]),  # ELO ranking tiebreaker
+            ))
 
-        third_df = pd.DataFrame(third_detailed)
-        third_df = third_df.sort_values(
-            ["points", "gd", "gf", "ranking"],
-            ascending=False
-        ).head(BEST_THIRD_PLACES)
+        third_detailed.sort(key=lambda x: (x[1], x[2], x[3], x[4]), reverse=True)
+        advancing_third = [t[0] for t in third_detailed[:BEST_THIRD_PLACES]]
 
-        advancing_third = third_df["team"].tolist()
-
-        advancing = ([t[1] for t in first_place] +
-                     [t[1] for t in second_place] +
-                     advancing_third)
+        advancing = first_place + second_place + advancing_third
         return advancing
 
     def _simulate_knockout_match(self, team_a: str, team_b: str) -> str:
@@ -219,7 +233,7 @@ class TournamentSimulator:
         Simulate a single knockout match. No draws allowed:
         normalize win probabilities and sample the winner.
         """
-        probs = self._predict_match(team_a, team_b, neutral=True)
+        probs = self._predict_match(team_a, team_b)
         p_win_a = probs["home_win"]
         p_draw = probs["draw"]
         p_win_b = probs["away_win"]

@@ -61,8 +61,9 @@ def test_select_knockout_teams(mock_model, mock_config):
 
 def test_knockout_match_no_draws(mock_model, mock_config):
     sim = TournamentSimulator(mock_model, mock_config)
-    winner = sim._simulate_knockout_match("TeamA", "TeamB")
-    assert winner in ["TeamA", "TeamB"]
+    # Use teams that exist in the pre-computed probability cache
+    winner = sim._simulate_knockout_match("Mexico", "South Africa")
+    assert winner in ["Mexico", "South Africa"]
 
 def test_group_points_calculation(mock_model, mock_config):
     sim = TournamentSimulator(mock_model, mock_config)
